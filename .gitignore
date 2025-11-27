@@ -17,3 +17,7 @@ __pycache__/
 # Evita subir configuraciones personales de tu editor de código.
 .vscode/
 .idea/
+
+*.egg-info
+
+src/files/*

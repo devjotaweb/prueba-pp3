@@ -1,67 +1,55 @@
-from db.db import db
-import asyncio
-import os
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-load_dotenv()
+from errors.ierror_interface import IError 
 
-async def test_async_connection():
-    """Prueba conexión asíncrona con consulta raw"""
-    try:
-        # Crear engine asíncrono
-        database_url = os.getenv("DATABASE_URL")
-        print(f"Conectando a: {database_url}")
-        
-        engine = create_async_engine(
-            database_url,
-            echo=True,  # Ver las consultas SQL en consola
-            pool_pre_ping=True  # Verificar conexión antes de usar
-        )
-        
-        # Crear sesión
-        async_session = sessionmaker(
-            engine, 
-            class_=AsyncSession, 
-            expire_on_commit=False
-        )
-        
-        async with async_session() as session:
-            # Consulta de prueba - información del servidor
-            result = await session.execute(
-                text("SELECT @@VERSION as version, @@SERVERNAME as server_name, DB_NAME() as database_name")
-            )
-            
-            row = result.fetchone()
-            print("\n🟢 CONEXIÓN EXITOSA!")
-            print(f"Servidor: {row.server_name}")
-            print(f"Base de datos: {row.database_name}")
-            print(f"Versión: {row.version[:50]}...")
-            
-            # Consulta a las tablas de tu sistema
-            tables_result = await session.execute(
-                text("""
-                    SELECT 
-                        TABLE_SCHEMA,
-                        TABLE_NAME,
-                        TABLE_TYPE
-                    FROM INFORMATION_SCHEMA.TABLES 
-                    WHERE TABLE_TYPE = 'BASE TABLE'
-                    ORDER BY TABLE_SCHEMA, TABLE_NAME
-                """)
-            )
-            
-            print("\n📋 TABLAS DISPONIBLES:")
-            for table in tables_result.fetchall():
-                print(f"  - {table.TABLE_SCHEMA}.{table.TABLE_NAME}")
-        
-        await engine.dispose()
-        
-    except Exception as e:
-        print(f"❌ ERROR DE CONEXIÓN: {e}")
-        print(f"Tipo de error: {type(e).__name__}")
+from api.auth.auth import auth_router
+from api.profiles.medicos import router as profiles_router
+from api.profiles.pacientes import router as pacientes_router
+from api.uploads.upload import router as upload_router
 
+try: 
+    
+    load_dotenv()
 
-asyncio.run(test_async_connection()) 
+    app = FastAPI(
+        title="Medify API",
+        description="API de Medify aplicación para tomar citas médicas y reseñar profesionales de la salud",
+        version="1.0.0"
+    )
+
+    @app.get("/")
+    async def root():
+        return {"message": "Medify API is running", "version": "1.0.0"}
+
+    #health-->pruebas unitarias
+    @app.get("/health", tags=["Health Check"])
+    def healt_check():
+        return{"status": "ok"}
+    
+    @app.exception_handler(IError)
+    async def ierror_exception_handler(request: Request, exc: IError):
+        return JSONResponse(
+        status_code=exc.http_code,
+        content={"detail": exc.msg}
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:4200", "http://localhost:8100"], #El primero cuando lo ejecuto desde angular, el otro desde ionic
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=True
+    )
+
+    # Routers
+    app.include_router(upload_router.router, prefix="/api/v1")
+    app.include_router(auth_router.router, prefix="/api/v1")
+    app.include_router(profiles_router.router, prefix="/api/v1")
+    app.include_router(pacientes_router.router, prefix="/api/v1")
+
+    
+except IError as ex:
+    raise Exception(status_code=ex.http_code,detail= f"{ex.msg}")
